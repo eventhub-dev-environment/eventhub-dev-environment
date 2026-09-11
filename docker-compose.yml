@@ -99,6 +99,26 @@ services:
     networks:
       - eventhub-network
 
+  # Broker de Mensajes RabbitMQ
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    container_name: eventhub-rabbitmq
+    ports:
+      - "5672:5672"    # Puerto AMQP para los microservicios
+      - "15672:15672"  # Panel de Administración Web
+    environment:
+      - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
+      - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-guest}
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    networks:
+      - eventhub-network
+
   # Servidor de Trazabilidad Distribuida
   zipkin:
     image: openzipkin/zipkin:latest
@@ -165,6 +185,27 @@ services:
         condition: service_started
     networks:
       - eventhub-network
+  # Microservicio Booking Service
+  booking-service:
+    build: ../eventhub-booking-service
+    container_name: eventhub-booking-service
+    ports:
+      - "8084:8084"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_bookings_db?authSource=admin
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
+      - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
+    networks:
+      - eventhub-network
 
   # API Gateway (Puerto Único Público)
   api-gateway:
@@ -193,3 +234,4 @@ volumes:
   postgres_data:
   mongo_data:
   minio_data:
+  rabbitmq_data:
