@@ -147,6 +147,25 @@ services:
     networks:
       - eventhub-network
 
+  # Microservicio Event Service
+  event-service:
+    build: ../eventhub-event-service
+    container_name: eventhub-event-service
+    ports:
+      - "8083:8083"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_events_db?authSource=admin
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
+      - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
+    networks:
+      - eventhub-network
+
   # API Gateway (Puerto Único Público)
   api-gateway:
     build: ../eventhub-api-gateway
@@ -161,6 +180,7 @@ services:
     depends_on:
       - config-service
       - auth-service
+      - event-service
       - zipkin
     networks:
       - eventhub-network
