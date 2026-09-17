@@ -207,6 +207,28 @@ services:
     networks:
       - eventhub-network
 
+  # Microservicio Payment Service
+  payment-service:
+    build: ../eventhub-payment-service
+    container_name: eventhub-payment-service
+    ports:
+      - "8085:8085"
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_payments_db?authSource=admin
+      - SPRING_RABBITMQ_HOST=rabbitmq
+      - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
+      - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      zipkin:
+        condition: service_started
+    networks:
+      - eventhub-network
+
   # API Gateway (Puerto Único Público)
   api-gateway:
     build: ../eventhub-api-gateway
@@ -222,6 +244,8 @@ services:
       - config-service
       - auth-service
       - event-service
+      - booking-service
+      - payment-service
       - zipkin
     networks:
       - eventhub-network
