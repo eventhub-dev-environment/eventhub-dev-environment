@@ -1,27 +1,7 @@
 version: '3.8'
 
 services:
-  # Base de datos relacional (auth-service, booking-service, payment-service)
-  postgres:
-    image: postgres:16-alpine
-    container_name: eventhub-postgres
-    environment:
-      POSTGRES_USER: ${MONGO_ROOT_USER}
-      POSTGRES_PASSWORD: ${MONGO_ROOT_PASS}
-      POSTGRES_DB: eventhub_db
-    ports:
-      - "5432:5432"
-    volumes:
-      - postgres_data:/var/lib/postgresql/data
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${MONGO_ROOT_USER} -d eventhub_db"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - eventhub-network
-
-  # Base de datos NoSQL (config-service, catalog-service, analytics-service)
+  # Base de datos NoSQL (event-service, notification-service, config-service)
   mongodb:
     image: mongo:7.0
     container_name: eventhub-mongodb
@@ -37,44 +17,6 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
-    networks:
-      - eventhub-network
-
-  # Event Broker (Kafka en modo Kraft)
-  kafka:
-    image: apache/kafka:3.7.0
-    container_name: eventhub-kafka
-    ports:
-      - "9092:9092"
-    environment:
-      KAFKA_NODE_ID: 1
-      KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: 'CONTROLLER:PLAINTEXT,PLAINTEXT:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT'
-      KAFKA_ADVERTISED_LISTENERS: 'PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092'
-      KAFKA_OFFSETS_TOPIC_REPLICATION_FACTOR: 1
-      KAFKA_GROUP_INITIAL_REBALANCE_DELAY_MS: 0
-      KAFKA_TRANSACTION_STATE_LOG_MIN_ISR: 1
-      KAFKA_TRANSACTION_STATE_LOG_REPLICATION_FACTOR: 1
-      KAFKA_PROCESS_ROLES: 'broker,controller'
-      KAFKA_CONTROLLER_QUORUM_VOTERS: '1@kafka:29093'
-      KAFKA_LISTENERS: 'PLAINTEXT://0.0.0.0:29092,CONTROLLER://0.0.0.0:29093,PLAINTEXT_HOST://0.0.0.0:9092'
-      KAFKA_INTER_BROKER_LISTENER_NAME: 'PLAINTEXT'
-      KAFKA_CONTROLLER_LISTENER_NAMES: 'CONTROLLER'
-      KAFKA_LOG_DIRS: '/tmp/kraft-combined-logs'
-      KAFKA_CLUSTER_ID: 'MkU3OEVBNTcwNTJENDM2Qk'
-    networks:
-      - eventhub-network
-
-  # UI para gestionar Kafka desde el navegador
-  kafka-ui:
-    image: provectuslabs/kafka-ui:latest
-    container_name: eventhub-kafka-ui
-    ports:
-      - "8080:8080"
-    environment:
-      KAFKA_CLUSTERS_0_NAME: local-cluster
-      KAFKA_CLUSTERS_0_BOOTSTRAPSERVERS: kafka:29092
-    depends_on:
-      - kafka
     networks:
       - eventhub-network
 
@@ -99,13 +41,13 @@ services:
     networks:
       - eventhub-network
 
-  # Broker de Mensajes RabbitMQ
+  # Broker de Mensajes Asíncronos
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
     container_name: eventhub-rabbitmq
     ports:
-      - "5672:5672"    # Puerto AMQP para los microservicios
-      - "15672:15672"  # Panel de Administración Web
+      - "5672:5672"
+      - "15672:15672"
     environment:
       - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-guest}
@@ -128,7 +70,17 @@ services:
     networks:
       - eventhub-network
 
-  # Microservicio Config Service
+  # Servidor de Monitoreo y Métricas
+  prometheus:
+    image: prom/prometheus:v2.50.1
+    container_name: eventhub-prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+    networks:
+      - eventhub-network
+
   config-service:
     build: ../eventhub-config-service
     container_name: eventhub-config-service
@@ -147,7 +99,6 @@ services:
     networks:
       - eventhub-network
 
-  # Microservicio Auth Service
   auth-service:
     build: ../eventhub-auth-service
     container_name: eventhub-auth-service
@@ -155,19 +106,18 @@ services:
       - "8082:8082"
     environment:
       - SPRING_PROFILES_ACTIVE=dev
-      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_auth_db?authSource=admin
+      - SPRING_DATASOURCE_URL=${NEON_DB_AUTH_URL}
+      - SPRING_DATASOURCE_USERNAME=${NEON_DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${NEON_DB_PASS}
       - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
       - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
       - JWT_SECRET=${JWT_SECRET}
     depends_on:
-      mongodb:
-        condition: service_healthy
       zipkin:
         condition: service_started
     networks:
       - eventhub-network
 
-  # Microservicio Event Service
   event-service:
     build: ../eventhub-event-service
     container_name: eventhub-event-service
@@ -185,7 +135,7 @@ services:
         condition: service_started
     networks:
       - eventhub-network
-  # Microservicio Booking Service
+
   booking-service:
     build: ../eventhub-booking-service
     container_name: eventhub-booking-service
@@ -193,13 +143,13 @@ services:
       - "8084:8084"
     environment:
       - SPRING_PROFILES_ACTIVE=dev
-      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_bookings_db?authSource=admin
+      - SPRING_DATASOURCE_URL=${NEON_DB_BOOKING_URL}
+      - SPRING_DATASOURCE_USERNAME=${NEON_DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${NEON_DB_PASS}
       - SPRING_RABBITMQ_HOST=rabbitmq
       - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
       - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
     depends_on:
-      mongodb:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       zipkin:
@@ -207,7 +157,6 @@ services:
     networks:
       - eventhub-network
 
-  # Microservicio Payment Service
   payment-service:
     build: ../eventhub-payment-service
     container_name: eventhub-payment-service
@@ -215,13 +164,13 @@ services:
       - "8085:8085"
     environment:
       - SPRING_PROFILES_ACTIVE=dev
-      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_payments_db?authSource=admin
+      - SPRING_DATASOURCE_URL=${NEON_DB_PAYMENT_URL}
+      - SPRING_DATASOURCE_USERNAME=${NEON_DB_USER}
+      - SPRING_DATASOURCE_PASSWORD=${NEON_DB_PASS}
       - SPRING_RABBITMQ_HOST=rabbitmq
       - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
       - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
     depends_on:
-      mongodb:
-        condition: service_healthy
       rabbitmq:
         condition: service_healthy
       zipkin:
@@ -238,7 +187,7 @@ services:
       - "8086:8086"
     environment:
       - SPRING_PROFILES_ACTIVE=dev
-      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_USER}:${MONGO_PASS}@mongodb:27017/eventhub_notifications_db?authSource=admin
+      - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_notifications_db?authSource=admin
       - SPRING_RABBITMQ_HOST=rabbitmq
       - SPRING_RABBITMQ_PORT=5672
       - SPRING_RABBITMQ_USERNAME=${RABBITMQ_USER}
@@ -254,7 +203,6 @@ services:
     networks:
       - eventhub-network
 
-  # API Gateway (Puerto Único Público)
   api-gateway:
     build: ../eventhub-api-gateway
     container_name: eventhub-api-gateway
@@ -281,7 +229,6 @@ networks:
     driver: bridge
 
 volumes:
-  postgres_data:
   mongo_data:
   minio_data:
   rabbitmq_data:
