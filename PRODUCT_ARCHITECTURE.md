@@ -1,178 +1,80 @@
+
 # Documento Maestro de Producto, Arquitectura y Operaciones — EventHub
 
-**Versión:** 1.1 (Consolidado: Negocio, Arquitectura, Repositorios & Hoja de Ruta)
+**Versión:** 2.0 (Consolidado: Ecosistema Microservicios, Async Event-Driven, AWS S3 & Neon DB)
 
-**Fecha de Última Actualización:** 11 de septiembre de 2026
+**Fecha de Última Actualización:** Octubre de 2026
 
-**Estado:** Documento Vivo de Especificación Final
-
-> Este documento describe la visión de producto y la arquitectura objetivo de EventHub. Para instrucciones de cómo levantar el entorno de desarrollo local, ver el `README.md` del repositorio `eventhub-dev-environment`.
+**Estado:** Documento Vivo de Especificación de Arquitectura
 
 ---
 
 ## 1. Modelo de Negocio
 
-**EventHub** es una plataforma **SaaS B2B Multi-tenant** de gestión de eventos, ticketing y analítica en tiempo real. Permite a empresas organizadoras de eventos operar bajo su propia marca (White-Label / Custom Branding) mediante un esquema de suscripción recurrente (Tiered Pricing) sumado a una comisión parametrizable por cada entrada vendida.
-
-### Flujos de Ingreso:
-
-* **Suscripción Base (SaaS Tier):** Cobro mensual o anual por el uso de la infraestructura multi-tenant, según el volumen de eventos y límites de concurrencia.
-
-* **Comisión por Transacción:** Porcentaje parametrizable por tenant (`config-service`) aplicado sobre el valor de cada ticket vendido.
-
-* **Servicios Add-on:** Módulos avanzados como dominios personalizados, integraciones premium y soporte de transmisión de alto tráfico.
+**EventHub** es una plataforma **SaaS B2B Multi-tenant** de gestión de eventos, ticketing y analítica en tiempo real. Permite a empresas organizadoras de eventos operar bajo su propia marca (White-Label / Custom Branding) mediante un esquema de suscripción recurrente sumado a una comisión parametrizable por entrada vendida.
 
 ---
 
-## 2. Clientes Objetivos y Usuarios Persona
-
-### Clientes Objetivos (Tenants B2B):
-
-* **Organizadores de Eventos Deportivos:** Maratones, carreras nocturnas, torneos de ciclismo (ej. carreras 5K/10K/Media Maratón). Requieren formularios adaptativos con tallas de camisetas, datos médicos y contactos de emergencia.
-
-* **Productoras de Conciertos y Teatro:** Promotoras que gestionan eventos masivos con silletería numerada, mapas de asientos y control estricto de accesos.
-
-* **Empresas de Conferencias y Talleres:** Organizadores B2B de charlas técnicas, meetups y seminarios con esquemas de admisión general y certificados de asistencia.
-
-### Usuarios Persona:
-
-* **Tenant Admin (Organizador):** Gerente o coordinador de eventos de la empresa cliente. Configura el branding, crea eventos, selecciona/personaliza plantillas de registro, define precios y analiza métricas de venta en tiempo real.
-
-* **Comprador Final (Cliente B2C):** Asistente al evento que navega la oferta y adquiere entradas. Selecciona la cantidad de entradas o asientos, completa los atributos dinámicos (talla, club, datos de pago), paga de forma segura y descarga sus tickets.
-
-* **Super Admin (EventHub):** Equipo interno de soporte y operaciones de EventHub. Gestiona la incorporación de nuevos tenants, monitorea la facturación global, supervisa límites de plataforma y controla la salud de los microservicios.
-
----
-
-## 3. Problema y Oportunidad de Mercado
-
-Las soluciones de boletaje tradicionales presentan graves falencias para las empresas medianas y grandes organizadoras de eventos:
-
-* **Falta de Personalización y Branding:** Las plataformas existentes fuerzan al comprador a salir del ecosistema de la marca organizadora, debilitando la identidad del cliente B2B.
-
-* **Incapacidad de Adaptar el Esquema de Entrada:** La mayoría de las boleterías están optimizadas únicamente para conciertos (asientos numerados) o entradas generales simples, fallando al capturar información específica requerida por eventos deportivos o corporativos (tallas, clubes, contactos de emergencia, requerimientos dietéticos).
-
-* **Sobrevendido (Overbooking) por Concurrencia Masiva:** Durante ventas relámpago o lanzamientos de alta demanda, los sistemas tradicionales sufren condiciones de carrera y terminan vendiendo el mismo cupo o asiento a múltiples usuarios.
-
-* **Acoplamiento Síncrono y Latencia Elevada:** Procesos pesados como la generación de PDFs o el envío de correos se ejecutan en la misma transacción HTTP de compra, provocando caídas del sistema y timeouts en la pasarela de pago.
-
----
-
-## 4. Hipótesis de Valor
-
-> *"Creemos que al ofrecer a las empresas organizadoras de eventos un SaaS multi-tenant verdaderamente configurable —que combine esquemas de registro dinámicos (plantillas e información personalizada) con una arquitectura distribuida que garantice cero overbooking mediante consistencia fuerte en base de datos y procesamiento asíncrono de tickets— lograremos reducir a cero los errores por venta duplicada, aumentar la conversión de compra en un 25% al acortar el tiempo de respuesta síncrono del checkout a menos de 500 ms, y ofrecer una plataforma 100% personalizable por tenant sin modificar una sola línea de código."*
-
----
-
-## 5. Primer Flujo Vertical Crítico (End-to-End Walkthrough)
+## 2. Flujo Vertical Crítico (End-to-End Walkthrough)
 
 ```text
-[Comprador / React Frontend] ──> (1. Solicita Reserva) ──> [API Gateway] ──> [booking-service (Spring Boot)]
-                                                                                │
-                                                                                ├── (2. Lock Fila / Transacción ACID en Postgres)
-                                                                                ├── (3. Cambia Estado: AVAILABLE ──> HELD)
-                                                                                │
-                                                                                ▼
-                                                                      [payment-service] ──> [Pasarela / Stripe Simulator]
-                                                                                │
-                                                                                ├── (4. Pago Exitoso)
-                                                                                ▼
-                                                                      [booking-service]
-                                                                                │
-                                                                                ├── (5. UPDATE: HELD ──> SOLD)
-                                                                                ├── (6. COMMIT Transacción)
-                                                                                │
-                                                                                └──> Publica Evento: BookingConfirmed ──> [Kafka Topic]
-                                                                                                                               │
-                                                                                                                               ▼
-                                                                                                                  [ticket-generator-service]
-                                                                                                                               │
-                                                                                                                               ├── (7. Genera PDF + QR)
-                                                                                                                               ├── (8. Guarda en MinIO / S3)
-                                                                                                                               └── (9. Notifica URL via Email)
+[Comprador / Frontend] ──> (1. Reserva Entrada) ──> [API Gateway (8000)]
+                                                         │
+                                                         ▼
+                                             [booking-service (8084)]
+                                                         │
+                                                         ├── (2. Lock Fila / DB Transaction en Neon Postgres)
+                                                         ├── (3. Estado: AVAILABLE ──> HELD)
+                                                         │
+                                                         ▼
+                                             [payment-service (8085)]
+                                                         │
+                                                         ├── (4. Procesamiento de Pago / Webhook)
+                                                         │
+                                                         ▼
+                                             [booking-service (8084)]
+                                                         │
+                                                         ├── (5. Estado: HELD ──> SOLD)
+                                                         ├── (6. Publica evento AMQP: 'booking.confirmed')
+                                                         │
+                                                         ▼
+                                               [RabbitMQ Broker]
+                                                         │
+                                                         ▼
+                                         [notification-service (8086)]
+                                                         │
+                                                         ├── (7. Obtiene Branding & Assets de AWS S3)
+                                                         ├── (8. Compila plantilla HTML con Thymeleaf)
+                                                         └── (9. Genera PDF/QR y envía correo vía SMTP)
+
 ```
 
-### Paso a Paso del Flujo:
+---
 
-1. **Inicio de Reserva:** El comprador selecciona la entrada/asiento en la interfaz web (React + Vite) e ingresa los campos dinámicos solicitados (ej. Talla "M", Club de Running). El request atraviesa el *Spring Cloud API Gateway* validando el `tenant_id`.
-2. **Bloqueo Concurrente y Hold Temporal:** `booking-service` (Spring Boot) inicia una transacción PostgreSQL e invoca un lock (`SELECT FOR UPDATE` o Lock Optimista sobre el asiento/cupo). Pasa el estado del cupo de `AVAILABLE` a `HELD` con un TTL (ej. 10 minutos) y realiza el `COMMIT`. El bloqueo de fila en la DB dura solo milisegundos.
-3. **Procesamiento de Pago Síncrono:** Fuera del lock de base de datos, `booking-service` invoca síncronamente a `payment-service` para cobro con la pasarela de pago.
-4. **Confirmación de Reserva (Consistencia Fuerte):** Tras confirmarse el pago, `booking-service` ejecuta un `UPDATE seats SET status = 'SOLD' WHERE status = 'HELD' AND booking_id = ?` dentro de una breve transacción ACID.
-5. **Desacoplamiento Event-Driven:** Inmediatamente después del `COMMIT`, `booking-service` emite el evento asíncrono `BookingConfirmed` al topic correspondiente en Apache Kafka.
-6. **Generación y Entrega Asíncrona de Tickets:** El microservicio `ticket-generator-service` consume `BookingConfirmed`, construye el PDF con el código QR único y los atributos dinámicos del comprador, lo almacena de forma aislada en MinIO/S3 (`s3://eventhub-tickets/{tenant_id}/{booking_id}.pdf`) y dispara el envío del correo electrónico con la URL firmada de descarga.
+## 3. Matriz de Microservicios y Componentes
+
+| Repositorio / Microservicio | Tecnología / Stack | Responsabilidad Principal | Persistencia / Storage |
+| --- | --- | --- | --- |
+| `eventhub-api-gateway` | Java 21, Spring Boot 3.x / WebFlux | Enrutamiento dinámico, verificación de JWT, inyección de `X-Gateway-Secret` y propagación de `X-Tenant-Id`. | Stateless |
+| `eventhub-config-service` | Java 21, Spring Boot 3.x | Parámetros de negocio por tenant, esquemas dinámicos de formularios de registro (`formSchema`). | MongoDB (`eventhub_config_db`) |
+| `eventhub-auth-service` | Java 21, Spring Boot 3.x | Autenticación, registro de usuarios/organizadores, emisión de JWT con claims de tenant. | Neon PostgreSQL |
+| `eventhub-event-service` | Java 21, Spring Boot 3.x | Gestión de eventos, localidades/tiers, precios y subida de imágenes de branding (logos, banners). | MongoDB + AWS S3 (`eventhub-branding-prod`) |
+| `eventhub-booking-service` | Java 21, Spring Boot 3.x | Motor de reserva de boletas, máquinas de estado (`AVAILABLE` → `HELD` → `SOLD`), control de expiración. | Neon PostgreSQL + RabbitMQ |
+| `eventhub-payment-service` | Java 21, Spring Boot 3.x | Integración y procesamiento de pagos / simulador de pasarela y webhooks de confirmación. | Neon PostgreSQL + RabbitMQ |
+| `eventhub-notification-service` | Java 21, Spring Boot 3.x | Consumidor AMQP, generación de tickets en PDF con código QR y envío de correos con branding. | MongoDB + AWS S3 |
 
 ---
 
-## 6. Arquitectura y Factores Técnicos ($0 USD Budget Stack)
+## 4. Estrategia Multirrepo y Visión CI/CD
 
-### 6.1 Principios Técnicos y Decisiones de Diseño
+El proyecto sigue un enfoque **Multirrepo**:
 
-* **Frontend:** React 19 + Vite (Single Page Application responsiva, con renderizado dinámico de formularios mediante React Hook Form basado en el `formSchema` recibido del backend).
-* **Backend:** Java 21 + Spring Boot, utilizando Arquitectura Hexagonal (Ports and Adapters) por microservicio. **Nota de versión (sep 2026):** `config-service`, `auth-service` y `api-gateway` están migrados a Spring Boot 4.1.1; el resto de microservicios del roadmap deberán construirse directamente sobre esta versión para evitar deuda de migración.
-* **Infraestructura Inmutable & IaC:** Terraform + Helm para orquestación de recursos de forma agnóstica a la nube y repetible.
-* **Automatización Radical (CI/CD GitOps):** GitHub Actions para compilación, testing y construcción de imágenes Docker + ArgoCD para despliegue automatizado basado en repositorio de manifiestos.
-* **Desacoplamiento de Configuración & Secretos:** `config-service` (MongoDB) para parámetros de negocio por tenant. **Meta de producción:** HashiCorp Vault para gestión de secretos y claves JWT en tiempo de ejecución. **Estado actual de desarrollo local:** los secretos se gestionan vía archivo `.env` + Docker Compose (ver README de `eventhub-dev-environment`); la migración a Vault está prevista para el despliegue en Kubernetes.
-* **Elasticidad & Auto-Escalado (500+ Clientes Concurrentes):** Implementación de Kubernetes (`k3d` / `Minikube` local) con KEDA (Kubernetes Event-driven Autoscaling) y HPA (Horizontal Pod Autoscaler) para escalar pods basados en lag de Kafka y consumo métrico.
-* **Observabilidad Centralizada:** LGTM Stack (Loki para logs, Grafana para tableros, Tempo para trazas distribuidas y Prometheus para métricas) con propagación de `trace_id` y `tenant_id` en headers HTTP y Kafka. **Estado actual de desarrollo local:** Zipkin como backend de trazas (vía Micrometer Tracing + Brave), pendiente de migrar a Tempo en el stack de observabilidad completo.
+* Un repositorio independiente por cada microservicio (`eventhub-api-gateway`, `eventhub-auth-service`, `eventhub-event-service`, etc.).
+* Repositorio de orquestación `eventhub-dev-environment` para desarrollo local y orquestación con Docker Compose.
 
-### 6.2 Matriz Tecnológica $0 USD
+### Pipeline CI/CD Objetivo (por microservicio)
 
-| Capa / Factor | Tecnología Adoptada ($0 USD / Open Source) | Propósito en la Arquitectura |
-| :--- | :--- | :--- |
-| **Frontend** | React 19 + Vite | Interfaz ultrarrápida para compradores y admins de tenant, con formularios dinámicos. |
-| **Backend Microservicios** | Java 21 + Spring Boot 4.x (Arquitectura Hexagonal) | Reglas de negocio aisladas, puertos/adaptadores limpios y alta eficiencia en runtime JVM. |
-| **Orquestación Local** | k3d / Minikube (Kubernetes sobre Docker) | Clúster K8s local multitarea de costo cero para simular producción con múltiples nodos. |
-| **Almacenamiento de Objetos** | MinIO (Self-hosted en K8s) | Reemplazo 100% compatible con AWS S3 para logos, marcas y PDFs de entradas con URLs firmadas. |
-| **Gestión de Secretos** | `.env` (dev local) → HashiCorp Vault (Community Edition, producción) | Inyección de credenciales de base de datos y llaves de cifrado; centralización planeada en Vault al llegar a K8s. |
-| **Bases de Datos & Broker** | PostgreSQL, MongoDB, Apache Kafka | Persistencia relacional ACID, persistencia NoSQL de esquemas flexibles y bus de eventos asíncrono. |
-| **IaC & GitOps** | Terraform + Helm + ArgoCD + GitHub Actions | Automatización completa desde el aprovisionamiento hasta el despliegue continuo inmutable. |
-| **Observabilidad** | Zipkin (dev local) → OpenTelemetry + Prometheus + Grafana + Tempo + Loki (producción) | Trazabilidad distribuida end-to-end con filtrado multi-tenant y monitoreo de SLOs. |
-
----
-
-## 7. Estrategia y Organización de Repositorios
-
-Para garantizar el desacoplamiento técnico y la integración continua (CI/CD) independiente por componente, la plataforma se estructura en una estrategia Multirrepo + Repositorios de Infraestructura:
-
-### 7.1 Frontend
-
-* `eventhub-frontend` (React + Vite): Portal público del comprador y panel administrativo del tenant.
-
-### 7.2 Backend & Microservicios (Java 21 / Spring Boot)
-
-* `eventhub-api-gateway`: Spring Cloud API Gateway (WebFlux), enrutamiento, validación JWT y propagación de `X-Tenant-Id`.
-* `eventhub-auth-service`: Registro/autenticación, gestión de roles y emisión de JWT con claims de tenant.
-* `eventhub-config-service`: Gestión de configuraciones por tenant, branding y esquemas de formularios (`formSchema`).
-* `eventhub-catalog-service`: Catálogo de eventos, categorías, recintos y asociación con plantillas.
-* `eventhub-booking-service`: Motor de reservas, gestión de estado (`AVAILABLE` → `HELD` → `SOLD`), locks ACID en Postgres y soporte `JSONB`.
-* `eventhub-payment-service`: Integración / simulador síncrono de pasarela de pagos.
-* `eventhub-ticket-generator-service`: Consumidor Kafka, generación de PDF con QR y almacenamiento en MinIO.
-* `eventhub-analytics-service`: Consumidor de eventos para agregaciones CQRS y paneles de métricas.
-
-### 7.3 Infraestructura y Operaciones (GitOps)
-
-* `eventhub-dev-environment`: Archivo `docker-compose.yml` base y scripts de inicialización para desarrollo local. Ver su `README.md` para instrucciones de setup.
-* `eventhub-k8s-manifests`: Configuración de Terraform, Helm Charts de cada microservicio y manifiestos de Kubernetes observados por ArgoCD.
-
----
-
-## 8. Plan de Inicio y Hoja de Ruta de Implementación
-
-1. **Paso 1 — Entorno Local Base:** ✅ Repositorio `eventhub-dev-environment` con `docker-compose.yml` (Postgres, MongoDB, Kafka, MinIO, Zipkin).
-2. **Paso 2 — Primer Microservicio:** ✅ `eventhub-config-service` (Java 21 / Spring Boot 4.1.1, Arquitectura Hexagonal) sirviendo configuraciones y `formSchema`.
-3. **Paso 3 — Seguridad & Routing:** ✅ `eventhub-auth-service` y `eventhub-api-gateway` interceptando peticiones e inyectando el contexto del tenant.
-4. **Paso 4 — Motor de Reservas & Pagos:** Pendiente. Construir `eventhub-catalog-service`, `eventhub-booking-service` (con locks en Postgres) y `eventhub-payment-service`.
-5. **Paso 5 — Desacoplamiento Event-Driven:** Pendiente. Integrar el publicador Kafka en `booking-service` y construir `eventhub-ticket-generator-service` con soporte para MinIO.
-6. **Paso 6 — Interfaz Web & Despliegue GitOps:** Pendiente. Desarrollar `eventhub-frontend` en React 19 y orquestar el clúster local con ArgoCD y Helm en `eventhub-k8s-manifests`.
-
-### Notas de migración Spring Boot 4.x (para los próximos microservicios)
-
-Al construir `catalog-service`, `booking-service`, `payment-service` y `ticket-generator-service`, partir directamente de Spring Boot 4.1.1 y tener en cuenta estos cambios de la 3.x → 4.x detectados durante la migración de `config-service`/`auth-service`/`api-gateway`:
-
-* **MongoDB:** la propiedad pasó de `spring.data.mongodb.uri` a `spring.mongodb.uri`.
-* **Zipkin:** requiere el módulo explícito `org.springframework.boot:spring-boot-zipkin` (antes incluido implícitamente en `spring-boot-actuator-autoconfigure`).
-* **Micrometer Tracing + Brave:** requiere `org.springframework.boot:spring-boot-micrometer-tracing-brave` explícito, además de `micrometer-tracing-bridge-brave`; sin él, `MicrometerTracingAutoConfiguration` nunca se activa y no se genera ningún span.
-* **Zipkin endpoint (propiedad):** pasó de `management.zipkin.tracing.endpoint` a `management.tracing.export.zipkin.endpoint`.
-* **Spring Cloud Gateway (solo aplica a `api-gateway`):** el starter se renombró de `spring-cloud-starter-gateway` a `spring-cloud-starter-gateway-server-webflux`, y el prefijo de propiedades de `spring.cloud.gateway.*` pasó a `spring.cloud.gateway.server.webflux.*`.
-* **HttpHeaders (Spring Framework 7):** dejó de implementar `MultiValueMap`; `containsKey()` fue reemplazado por `containsHeader()`.
-* **springdoc-openapi:** requiere la rama `3.x` (no `2.x`) para ser compatible con Spring Framework 7.
+1. **Trigger:** `push` / `pull_request` sobre la rama `main`.
+2. **Build & Test:** Compilación e integración continua utilizando Java 21 y Gradle.
+3. **Containerization:** Construcción de imagen OCI (Docker) optimizada.
+4. **Publishing:** Publicación automática de la imagen etiquetada en Docker Hub / GitHub Container Registry (GHCR).
