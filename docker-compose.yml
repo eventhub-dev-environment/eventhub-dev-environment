@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   # Base de datos NoSQL (event-service, notification-service, config-service)
   mongodb:
@@ -20,27 +18,6 @@ services:
     networks:
       - eventhub-network
 
-  # Object Storage local (Branding y Tickets - S3 Compatible)
-  minio:
-    image: minio/minio:latest
-    container_name: eventhub-minio
-    environment:
-      MINIO_ROOT_USER: ${MONGO_ROOT_USER}
-      MINIO_ROOT_PASSWORD: ${MONGO_ROOT_PASS}
-    command: server /data --console-address ":9001"
-    ports:
-      - "9000:9000"
-      - "9001:9001"
-    volumes:
-      - minio_data:/data
-    healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
-      interval: 5s
-      timeout: 5s
-      retries: 5
-    networks:
-      - eventhub-network
-
   # Broker de Mensajes Asíncronos
   rabbitmq:
     image: rabbitmq:3.13-management-alpine
@@ -52,6 +29,7 @@ services:
       - RABBITMQ_DEFAULT_USER=${RABBITMQ_USER:-guest}
       - RABBITMQ_DEFAULT_PASS=${RABBITMQ_PASS:-guest}
     volumes:
+      - ./rabbitmq-enabled-plugins:/etc/rabbitmq/enabled_plugins:ro
       - rabbitmq_data:/var/lib/rabbitmq
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -78,6 +56,20 @@ services:
       - "9090:9090"
     volumes:
       - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - ./prometheus.rules.yml:/etc/prometheus/prometheus.rules.yml:ro
+    networks:
+      - eventhub-network
+
+  alertmanager:
+    image: prom/alertmanager:v0.27.0
+    container_name: eventhub-alertmanager
+    profiles:
+      - alerting
+    ports:
+      - "127.0.0.1:9093:9093"
+    volumes:
+      - ./alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+      - ./secrets/alertmanager-webhook-url:/run/secrets/webhook-url:ro
     networks:
       - eventhub-network
 
@@ -128,6 +120,13 @@ services:
       - SPRING_DATA_MONGODB_URI=mongodb://${MONGO_ROOT_USER}:${MONGO_ROOT_PASS}@mongodb:27017/eventhub_events_db?authSource=admin
       - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
       - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
+      # Integración con AWS S3 real
+      - AWS_S3_ENDPOINT=
+      - AWS_S3_PUBLIC_URL=https://eventhub-branding-prod.s3.us-east-1.amazonaws.com
+      - AWS_S3_ACCESS_KEY=${AWS_ACCESS_KEY_ID}
+      - AWS_S3_SECRET_KEY=${AWS_SECRET_ACCESS_KEY}
+      - AWS_S3_BUCKET_NAME=eventhub-branding-prod
+      - AWS_S3_REGION=us-east-1
     depends_on:
       mongodb:
         condition: service_healthy
@@ -168,8 +167,15 @@ services:
       - SPRING_DATASOURCE_USERNAME=${NEON_DB_USER}
       - SPRING_DATASOURCE_PASSWORD=${NEON_DB_PASS}
       - SPRING_RABBITMQ_HOST=rabbitmq
+      - SPRING_RABBITMQ_USERNAME=${RABBITMQ_USER}
+      - SPRING_RABBITMQ_PASSWORD=${RABBITMQ_PASS}
       - MANAGEMENT_TRACING_EXPORT_ZIPKIN_ENDPOINT=${ZIPKIN_ENDPOINT}
       - GATEWAY_INTERNAL_SECRET=${GATEWAY_INTERNAL_SECRET}
+      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+      - PAYMENT_CHECKOUT_SUCCESS_URL=${PAYMENT_CHECKOUT_SUCCESS_URL}
+      - PAYMENT_CHECKOUT_CANCEL_URL=${PAYMENT_CHECKOUT_CANCEL_URL}
+      - PAYMENT_WEBHOOK_HMAC_SECRET=${PAYMENT_WEBHOOK_HMAC_SECRET}
     depends_on:
       rabbitmq:
         condition: service_healthy
@@ -230,5 +236,4 @@ networks:
 
 volumes:
   mongo_data:
-  minio_data:
   rabbitmq_data:
