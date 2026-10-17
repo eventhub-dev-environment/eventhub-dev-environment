@@ -18,9 +18,10 @@ Entorno de desarrollo local para la plataforma EventHub (SaaS B2B multi-tenant d
 | `payment-service` | Stripe Checkout, procesamiento de webhooks y publicación de pagos mediante outbox (Neon PostgreSQL + RabbitMQ) | 8085 |
 | `notification-service` | Consumidor asíncrono RabbitMQ, envío de correos HTML con branding dinámico y tickets PDF (MongoDB) | 8086 |
 | `mongodb` | Base de datos NoSQL para `config-service`, `event-service` y `notification-service` | 27017 |
-| `rabbitmq` | Broker de mensajería asíncrona AMQP (Event-Driven architecture) | 5672 / 15672 (UI) |
+| `rabbitmq` | Broker de mensajería asíncrona AMQP (Event-Driven architecture) | 5672 / 15672 (UI); 15692 (métricas internas) |
 | `zipkin` | Backend de trazas distribuidas y observabilidad | 9411 |
 | `prometheus` | Recolección y monitoreo de métricas | 9090 |
+| `alertmanager` | Enrutamiento de alertas Prometheus (perfil opcional `alerting`) | 9093 |
 
 > **Nota de Bases de Datos Relacionales:** Los microservicios `auth-service`, `booking-service` y `payment-service` se conectan directamente a **Neon PostgreSQL (Cloud Serverless)** configurado mediante variables de entorno en `.env`.
 
@@ -31,7 +32,7 @@ Entorno de desarrollo local para la plataforma EventHub (SaaS B2B multi-tenant d
 ### 1. Requisitos previos
 
 - Docker y Docker Desktop instalados.
-- Puertos `5672, 8000, 8081, 8082, 8083, 8084, 8085, 8086, 9090, 9411, 15672, 27017` libres en tu máquina.
+- Puertos `5672, 8000, 8081, 8082, 8083, 8084, 8085, 8086, 9090, 9093, 9411, 15672, 27017` libres en tu máquina.
 
 ### 2. Configuración de variables de entorno
 
@@ -82,6 +83,16 @@ docker compose ps
 * RabbitMQ Management UI: `http://localhost:15672` (usuario/password configurados en `.env`)
 * Zipkin Traces: `http://localhost:9411`
 * Prometheus Metrics: `http://localhost:9090`
+
+Prometheus recopila las métricas de profundidad por cola de RabbitMQ y evalúa las reglas de `prometheus.rules.yml`: una DLQ con mensajes durante 5 minutos y cualquier outbox con eventos `FAILED` generan alertas. El endpoint de métricas RabbitMQ (15692) solo está disponible dentro de la red Docker.
+
+Para enviar alertas fuera de Prometheus, configura un endpoint compatible con el formato webhook de Alertmanager en el archivo local `secrets\alertmanager-webhook-url` y activa el perfil opcional:
+
+```powershell
+docker compose --profile alerting up -d alertmanager
+```
+
+El archivo de URL del webhook está excluido de Git. No publiques su contenido ni lo incluyas en logs. Sin ese archivo y un endpoint válido, las reglas siguen evaluándose en Prometheus, pero Alertmanager no podrá entregar notificaciones.
 
 ---
 
