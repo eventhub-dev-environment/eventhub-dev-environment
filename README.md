@@ -15,7 +15,7 @@ Entorno de desarrollo local para la plataforma EventHub (SaaS B2B multi-tenant d
 | `auth-service` | Registro/login, emisión y validación de JWT con claims de tenant (Neon PostgreSQL) | 8082 |
 | `event-service` | Gestión del catálogo de eventos, tiers de boletas y branding multi-tenant (MongoDB + AWS S3) | 8083 |
 | `booking-service` | Motor de reservas, gestión de estados (`AVAILABLE` → `HELD` → `SOLD`), control de expiración (Neon PostgreSQL + RabbitMQ) | 8084 |
-| `payment-service` | Simulador y procesador de pagos / webhooks síncronos (Neon PostgreSQL + RabbitMQ) | 8085 |
+| `payment-service` | Stripe Checkout, procesamiento de webhooks y publicación de pagos mediante outbox (Neon PostgreSQL + RabbitMQ) | 8085 |
 | `notification-service` | Consumidor asíncrono RabbitMQ, envío de correos HTML con branding dinámico y tickets PDF (MongoDB) | 8086 |
 | `mongodb` | Base de datos NoSQL para `config-service`, `event-service` y `notification-service` | 27017 |
 | `rabbitmq` | Broker de mensajería asíncrona AMQP (Event-Driven architecture) | 5672 / 15672 (UI) |
@@ -49,9 +49,18 @@ Variables principales en `.env`:
 | `MONGO_ROOT_USER` / `MONGO_ROOT_PASS` | Credenciales root de la instancia MongoDB en Docker |
 | `GATEWAY_INTERNAL_SECRET` | Clave secreta compartida entre el Gateway y los microservicios internos (`X-Gateway-Secret`) |
 | `JWT_SECRET` | Clave HMAC-SHA256 para firmar/verificar tokens JWT |
+| `STRIPE_SECRET_KEY` | Clave privada de Stripe para crear Checkout Sessions |
+| `STRIPE_WEBHOOK_SECRET` | Secreto `whsec_` del endpoint de Stripe para verificar webhooks |
+| `PAYMENT_CHECKOUT_SUCCESS_URL` | URL de retorno tras un pago; incluye `{CHECKOUT_SESSION_ID}` si el cliente necesita recuperar la sesión |
+| `PAYMENT_CHECKOUT_CANCEL_URL` | URL de retorno cuando el cliente cancela Checkout |
+| `PAYMENT_WEBHOOK_HMAC_SECRET` | Secreto opcional para el webhook HMAC interno heredado; no sirve para verificar webhooks de Stripe |
 | `NEON_DB_*` | URLs y credenciales de las bases de datos relacionales en Neon PostgreSQL |
 | `AWS_ACCESS_KEY_ID` / `AWS_SECRET_ACCESS_KEY` | Credenciales de AWS IAM para almacenamiento de branding y tickets en AWS S3 |
 | `MAIL_USERNAME` / `MAIL_PASSWORD` | Configuración SMTP de correo para `notification-service` |
+
+Stripe Checkout permanecerá deshabilitado hasta configurar las cuatro variables `STRIPE_*` y `PAYMENT_CHECKOUT_*` con valores del entorno. El endpoint público que debe registrarse en Stripe es `POST /api/v1/payments/webhook/stripe`; configura allí los eventos `payment_intent.succeeded` y `payment_intent.payment_failed`. No guardes claves reales en el repositorio.
+
+Para probar webhooks en local, usa Stripe CLI y reenvía los eventos al API Gateway con `stripe listen --forward-to http://localhost:8000/api/v1/payments/webhook/stripe`; configura en `.env` el secreto `whsec_` que Stripe CLI entrega para esa escucha. El endpoint local no es accesible directamente desde Stripe.
 
 ### 3. Levantar el ecosistema
 
